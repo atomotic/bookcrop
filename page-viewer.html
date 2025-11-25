@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .header {
+            padding: 12px 20px;
+            background: #2a2a2a;
+            border-bottom: 1px solid #3a3a3a;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        button {
+            padding: 8px 16px;
+            background: #4a4a4a;
+            color: #e0e0e0;
+            border: 1px solid #5a5a5a;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            background: #5a5a5a;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .info {
+            font-size: 14px;
+            color: #a0a0a0;
+        }
+
+        .image-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            overflow: auto;
+        }
+
+        .image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .placeholder {
+            text-align: center;
+            color: #666;
+            font-size: 16px;
+        }
+
+        .controls {
+            padding: 12px 20px;
+            background: #2a2a2a;
+            border-top: 1px solid #3a3a3a;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .controls button {
+            min-width: 80px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <button id="selectBtn">Select Directory</button>
+        <div class="info" id="info">No directory selected</div>
+    </div>
+
+    <div class="image-container" id="imageContainer">
+        <div class="placeholder">Select a directory to begin</div>
+    </div>
+
+    <div class="controls">
+        <button id="prevBtn" disabled>Previous</button>
+        <button id="nextBtn" disabled>Next</button>
+    </div>
+
+    <script>
+        let directoryHandle = null;
+        let imageFiles = [];
+        let currentIndex = 0;
+
+        const selectBtn = document.getElementById('selectBtn');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const info = document.getElementById('info');
+        const imageContainer = document.getElementById('imageContainer');
+
+        const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff'];
+
+        selectBtn.addEventListener('click', async () => {
+            try {
+                directoryHandle = await window.showDirectoryPicker();
+                await loadImages();
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    console.error('Error selecting directory:', err);
+                    alert('Error selecting directory: ' + err.message);
+                }
+            }
+        });
+
+        prevBtn.addEventListener('click', () => {
+            if (currentIndex > 0) {
+                currentIndex--;
+                displayImage();
+            }
+        });
+
+        nextBtn.addEventListener('click', () => {
+            if (currentIndex < imageFiles.length - 1) {
+                currentIndex++;
+                displayImage();
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft' && !prevBtn.disabled) {
+                prevBtn.click();
+            } else if (e.key === 'ArrowRight' && !nextBtn.disabled) {
+                nextBtn.click();
+            }
+        });
+
+        async function loadImages() {
+            imageFiles = [];
+
+            for await (const entry of directoryHandle.values()) {
+                if (entry.kind === 'file') {
+                    const ext = '.' + entry.name.split('.').pop().toLowerCase();
+                    if (imageExtensions.includes(ext)) {
+                        imageFiles.push(entry);
+                    }
+                }
+            }
+
+            imageFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+            if (imageFiles.length === 0) {
+                info.textContent = 'No images found in directory';
+                imageContainer.innerHTML = '<div class="placeholder">No images found</div>';
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
+                return;
+            }
+
+            currentIndex = 0;
+            displayImage();
+        }
+
+        async function displayImage() {
+            if (imageFiles.length === 0) return;
+
+            const fileHandle = imageFiles[currentIndex];
+            const file = await fileHandle.getFile();
+            const url = URL.createObjectURL(file);
+
+            imageContainer.innerHTML = `<img src="${url}" alt="${fileHandle.name}">`;
+            info.textContent = `${currentIndex + 1} / ${imageFiles.length} - ${fileHandle.name}`;
+
+            prevBtn.disabled = currentIndex === 0;
+            nextBtn.disabled = currentIndex === imageFiles.length - 1;
+        }
+    </script>
+</body>
+</html>
