@@ -1,4 +1,4 @@
-# Page Viewer - Margin Selector
+# BookCrop
 
 A browser-based tool for selecting margins on scanned book pages and exporting crop coordinates for batch processing with VIPS.
 
@@ -67,7 +67,7 @@ This web application provides an interactive interface for defining crop margins
 
 ### Getting Started
 
-1. Open `page-viewer.html` in a Chromium-based browser
+1. Open `bookcrop.html` in a Chromium-based browser
 2. Click **Select Directory** and choose your scans folder
 3. The first image loads with page indicators at the bottom
 
@@ -113,9 +113,9 @@ This web application provides an interactive interface for defining crop margins
 ## File Structure
 
 ```
-scantailorweb/
-├── page-viewer.html    # Single-file web application
-└── Claude.md          # This documentation file
+bookcrop/
+├── bookcrop.html      # Single-file web application
+└── README.md          # This documentation file
 ```
 
 ## Technical Details
@@ -200,7 +200,7 @@ scantailorweb/
 
 ## Installation
 
-No installation required. Simply open `page-viewer.html` in a supported browser.
+No installation required. Simply open `bookcrop.html` in a supported browser.
 
 For VIPS command-line tool:
 ```bash
@@ -220,4 +220,4 @@ Generated with [Claude Code](https://claude.com/claude-code)
 
 ## Contributing
 
-This is a single-file web application designed for simplicity and portability. All HTML, CSS, and JavaScript are contained in `page-viewer.html`.
+This is a single-file web application designed for simplicity and portability. All HTML, CSS, and JavaScript are contained in `bookcrop.html`.

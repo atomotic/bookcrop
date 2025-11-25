@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Page Viewer - Margin Selector</title>
+    <title>BookCrop</title>
     <style>
         * {
             margin: 0;
@@ -688,7 +688,7 @@
 
             let script = '#!/bin/bash\n\n';
             script += '# VIPS image cropping script\n';
-            script += `# Generated from page-viewer selections for: ${directoryName}\n\n`;
+            script += `# Generated from BookCrop selections for: ${directoryName}\n\n`;
             script += 'mkdir -p cropped\n\n';
 
             for (const [pageId, sel] of Object.entries(selections)) {
