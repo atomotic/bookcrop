@@ -146,9 +146,11 @@
 
     <script>
         let directoryHandle = null;
+        let directoryName = null;
         let imageFiles = [];
         let currentIndex = 0;
-        let selections = {}; // pageId -> {ulx, uly, lrx, lry}
+        let allSelections = {}; // directoryName -> { pageId -> {ulx, uly, lrx, lry} }
+        let selections = {}; // current directory's selections: pageId -> {ulx, uly, lrx, lry}
         let isLocked = false;
 
         // Selection state
@@ -173,29 +175,48 @@
         const STORAGE_KEY = 'page-selections';
         const HANDLE_SIZE = 10;
 
-        // Load selections from localStorage
-        function loadSelectionsFromStorage() {
+        // Load all selections from localStorage
+        function loadAllSelectionsFromStorage() {
             const stored = localStorage.getItem(STORAGE_KEY);
             if (stored) {
                 try {
-                    selections = JSON.parse(stored);
+                    allSelections = JSON.parse(stored);
                 } catch (e) {
                     console.error('Error loading selections:', e);
-                    selections = {};
+                    allSelections = {};
                 }
             }
         }
 
-        // Save selections to localStorage
-        function saveSelectionsToStorage() {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(selections));
+        // Save all selections to localStorage
+        function saveAllSelectionsToStorage() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(allSelections));
         }
 
-        loadSelectionsFromStorage();
+        // Load selections for current directory
+        function loadSelectionsForDirectory() {
+            if (directoryName && allSelections[directoryName]) {
+                selections = allSelections[directoryName];
+            } else {
+                selections = {};
+            }
+        }
+
+        // Save current directory's selections
+        function saveSelectionsForDirectory() {
+            if (directoryName) {
+                allSelections[directoryName] = selections;
+                saveAllSelectionsToStorage();
+            }
+        }
+
+        loadAllSelectionsFromStorage();
 
         selectBtn.addEventListener('click', async () => {
             try {
                 directoryHandle = await window.showDirectoryPicker();
+                directoryName = directoryHandle.name;
+                loadSelectionsForDirectory();
                 await loadImages();
             } catch (err) {
                 if (err.name !== 'AbortError') {
@@ -304,7 +325,7 @@
                 drawSelection(canvas);
             };
 
-            info.textContent = `${currentIndex + 1} / ${imageFiles.length} - ${fileHandle.name}`;
+            info.textContent = `[${directoryName}] ${currentIndex + 1} / ${imageFiles.length} - ${fileHandle.name}`;
             lockBtn.disabled = false;
             prevBtn.disabled = currentIndex === 0;
             nextBtn.disabled = currentIndex === imageFiles.length - 1;
@@ -318,7 +339,7 @@
             const pageId = getCurrentPageId();
             if (pageId && selection) {
                 selections[pageId] = { ...selection };
-                saveSelectionsToStorage();
+                saveSelectionsForDirectory();
             }
         }
 
@@ -543,7 +564,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'page-selections.csv';
+            a.download = `${directoryName}-selections.csv`;
             a.click();
             URL.revokeObjectURL(url);
         }
@@ -556,7 +577,7 @@
 
             let script = '#!/bin/bash\n\n';
             script += '# VIPS image cropping script\n';
-            script += '# Generated from page-viewer selections\n\n';
+            script += `# Generated from page-viewer selections for: ${directoryName}\n\n`;
             script += 'mkdir -p cropped\n\n';
 
             for (const [pageId, sel] of Object.entries(selections)) {
@@ -571,7 +592,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'crop-images.sh';
+            a.download = `${directoryName}-crop.sh`;
             a.click();
             URL.revokeObjectURL(url);
         }
