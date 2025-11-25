@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Page Viewer</title>
+    <title>Page Viewer - Margin Selector</title>
     <style>
         * {
             margin: 0;
@@ -28,6 +28,7 @@
             display: flex;
             align-items: center;
             gap: 15px;
+            flex-wrap: wrap;
         }
 
         button {
@@ -50,9 +51,27 @@
             cursor: not-allowed;
         }
 
+        button.active {
+            background: #0066cc;
+            border-color: #0077ee;
+        }
+
+        button.active:hover {
+            background: #0077ee;
+        }
+
         .info {
             font-size: 14px;
             color: #a0a0a0;
+        }
+
+        .coordinates {
+            font-size: 13px;
+            color: #6c9;
+            font-family: monospace;
+            padding: 4px 8px;
+            background: #2a2a2a;
+            border-radius: 3px;
         }
 
         .image-container {
@@ -62,13 +81,27 @@
             justify-content: center;
             padding: 20px;
             overflow: auto;
+            position: relative;
         }
 
-        .image-container img {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
+        .image-wrapper {
+            position: relative;
+            display: inline-block;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .image-wrapper img {
+            display: block;
+            max-width: 100%;
+            max-height: calc(100vh - 200px);
+            object-fit: contain;
+        }
+
+        .image-wrapper canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
         }
 
         .placeholder {
@@ -84,6 +117,7 @@
             display: flex;
             justify-content: center;
             gap: 10px;
+            flex-wrap: wrap;
         }
 
         .controls button {
@@ -95,6 +129,10 @@
     <div class="header">
         <button id="selectBtn">Select Directory</button>
         <div class="info" id="info">No directory selected</div>
+        <button id="lockBtn" disabled>Lock Selection</button>
+        <button id="exportBtn" disabled>Export CSV</button>
+        <button id="exportVipsBtn" disabled>Export VIPS Script</button>
+        <div class="coordinates" id="coordinates">No selection</div>
     </div>
 
     <div class="image-container" id="imageContainer">
@@ -110,14 +148,50 @@
         let directoryHandle = null;
         let imageFiles = [];
         let currentIndex = 0;
+        let selections = {}; // pageId -> {ulx, uly, lrx, lry}
+        let isLocked = false;
+
+        // Selection state
+        let selection = null; // {ulx, uly, lrx, lry}
+        let isDrawing = false;
+        let isDragging = false;
+        let isResizing = false;
+        let dragStart = null;
+        let resizeHandle = null; // 'nw', 'ne', 'sw', 'se', or null
 
         const selectBtn = document.getElementById('selectBtn');
         const prevBtn = document.getElementById('prevBtn');
         const nextBtn = document.getElementById('nextBtn');
+        const lockBtn = document.getElementById('lockBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const exportVipsBtn = document.getElementById('exportVipsBtn');
         const info = document.getElementById('info');
+        const coordinates = document.getElementById('coordinates');
         const imageContainer = document.getElementById('imageContainer');
 
         const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff'];
+        const STORAGE_KEY = 'page-selections';
+        const HANDLE_SIZE = 10;
+
+        // Load selections from localStorage
+        function loadSelectionsFromStorage() {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (stored) {
+                try {
+                    selections = JSON.parse(stored);
+                } catch (e) {
+                    console.error('Error loading selections:', e);
+                    selections = {};
+                }
+            }
+        }
+
+        // Save selections to localStorage
+        function saveSelectionsToStorage() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(selections));
+        }
+
+        loadSelectionsFromStorage();
 
         selectBtn.addEventListener('click', async () => {
             try {
@@ -133,6 +207,7 @@
 
         prevBtn.addEventListener('click', () => {
             if (currentIndex > 0) {
+                saveCurrentSelection();
                 currentIndex--;
                 displayImage();
             }
@@ -140,9 +215,24 @@
 
         nextBtn.addEventListener('click', () => {
             if (currentIndex < imageFiles.length - 1) {
+                saveCurrentSelection();
                 currentIndex++;
                 displayImage();
             }
+        });
+
+        lockBtn.addEventListener('click', () => {
+            isLocked = !isLocked;
+            lockBtn.textContent = isLocked ? 'Unlock Selection' : 'Lock Selection';
+            lockBtn.classList.toggle('active', isLocked);
+        });
+
+        exportBtn.addEventListener('click', () => {
+            exportToCSV();
+        });
+
+        exportVipsBtn.addEventListener('click', () => {
+            exportVipsScript();
         });
 
         document.addEventListener('keydown', (e) => {
@@ -176,6 +266,8 @@
             }
 
             currentIndex = 0;
+            exportBtn.disabled = false;
+            exportVipsBtn.disabled = false;
             displayImage();
         }
 
@@ -186,11 +278,302 @@
             const file = await fileHandle.getFile();
             const url = URL.createObjectURL(file);
 
-            imageContainer.innerHTML = `<img src="${url}" alt="${fileHandle.name}">`;
-            info.textContent = `${currentIndex + 1} / ${imageFiles.length} - ${fileHandle.name}`;
+            // Create image wrapper with canvas overlay
+            const wrapper = document.createElement('div');
+            wrapper.className = 'image-wrapper';
 
+            const img = document.createElement('img');
+            img.src = url;
+            img.alt = fileHandle.name;
+
+            const canvas = document.createElement('canvas');
+
+            wrapper.appendChild(img);
+            wrapper.appendChild(canvas);
+            imageContainer.innerHTML = '';
+            imageContainer.appendChild(wrapper);
+
+            img.onload = () => {
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                canvas.style.width = img.clientWidth + 'px';
+                canvas.style.height = img.clientHeight + 'px';
+
+                setupCanvasEvents(canvas, img);
+                loadCurrentSelection();
+                drawSelection(canvas);
+            };
+
+            info.textContent = `${currentIndex + 1} / ${imageFiles.length} - ${fileHandle.name}`;
+            lockBtn.disabled = false;
             prevBtn.disabled = currentIndex === 0;
             nextBtn.disabled = currentIndex === imageFiles.length - 1;
+        }
+
+        function getCurrentPageId() {
+            return imageFiles[currentIndex]?.name || null;
+        }
+
+        function saveCurrentSelection() {
+            const pageId = getCurrentPageId();
+            if (pageId && selection) {
+                selections[pageId] = { ...selection };
+                saveSelectionsToStorage();
+            }
+        }
+
+        function loadCurrentSelection() {
+            const pageId = getCurrentPageId();
+            if (pageId && selections[pageId]) {
+                selection = { ...selections[pageId] };
+            }
+            updateCoordinatesDisplay();
+        }
+
+        function setupCanvasEvents(canvas, img) {
+            const getMousePos = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                return {
+                    x: (e.clientX - rect.left) * scaleX,
+                    y: (e.clientY - rect.top) * scaleY
+                };
+            };
+
+            const getResizeHandle = (pos) => {
+                if (!selection) return null;
+                const threshold = HANDLE_SIZE;
+
+                const nearUL = Math.abs(pos.x - selection.ulx) < threshold && Math.abs(pos.y - selection.uly) < threshold;
+                const nearUR = Math.abs(pos.x - selection.lrx) < threshold && Math.abs(pos.y - selection.uly) < threshold;
+                const nearLL = Math.abs(pos.x - selection.ulx) < threshold && Math.abs(pos.y - selection.lry) < threshold;
+                const nearLR = Math.abs(pos.x - selection.lrx) < threshold && Math.abs(pos.y - selection.lry) < threshold;
+
+                if (nearUL) return 'nw';
+                if (nearUR) return 'ne';
+                if (nearLL) return 'sw';
+                if (nearLR) return 'se';
+                return null;
+            };
+
+            const isInsideSelection = (pos) => {
+                if (!selection) return false;
+                return pos.x >= selection.ulx && pos.x <= selection.lrx &&
+                       pos.y >= selection.uly && pos.y <= selection.lry;
+            };
+
+            canvas.addEventListener('mousedown', (e) => {
+                const pos = getMousePos(e);
+
+                if (selection) {
+                    const handle = getResizeHandle(pos);
+                    if (handle && !isLocked) {
+                        isResizing = true;
+                        resizeHandle = handle;
+                        return;
+                    }
+
+                    if (isInsideSelection(pos)) {
+                        isDragging = true;
+                        dragStart = { x: pos.x - selection.ulx, y: pos.y - selection.uly };
+                        return;
+                    }
+
+                    // When locked, don't allow drawing a new selection
+                    if (isLocked) {
+                        return;
+                    }
+                }
+
+                // Start new selection
+                isDrawing = true;
+                selection = { ulx: pos.x, uly: pos.y, lrx: pos.x, lry: pos.y };
+                drawSelection(canvas);
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                const pos = getMousePos(e);
+
+                if (isDrawing) {
+                    selection.lrx = pos.x;
+                    selection.lry = pos.y;
+                    drawSelection(canvas);
+                    updateCoordinatesDisplay();
+                } else if (isDragging && selection) {
+                    const width = selection.lrx - selection.ulx;
+                    const height = selection.lry - selection.uly;
+                    selection.ulx = Math.max(0, Math.min(canvas.width - width, pos.x - dragStart.x));
+                    selection.uly = Math.max(0, Math.min(canvas.height - height, pos.y - dragStart.y));
+                    selection.lrx = selection.ulx + width;
+                    selection.lry = selection.uly + height;
+                    drawSelection(canvas);
+                    updateCoordinatesDisplay();
+                } else if (isResizing && selection && !isLocked) {
+                    const { ulx, uly, lrx, lry } = selection;
+
+                    switch (resizeHandle) {
+                        case 'nw':
+                            selection.ulx = Math.min(pos.x, lrx - 10);
+                            selection.uly = Math.min(pos.y, lry - 10);
+                            break;
+                        case 'ne':
+                            selection.lrx = Math.max(pos.x, ulx + 10);
+                            selection.uly = Math.min(pos.y, lry - 10);
+                            break;
+                        case 'sw':
+                            selection.ulx = Math.min(pos.x, lrx - 10);
+                            selection.lry = Math.max(pos.y, uly + 10);
+                            break;
+                        case 'se':
+                            selection.lrx = Math.max(pos.x, ulx + 10);
+                            selection.lry = Math.max(pos.y, uly + 10);
+                            break;
+                    }
+
+                    drawSelection(canvas);
+                    updateCoordinatesDisplay();
+                } else {
+                    // Update cursor
+                    if (selection) {
+                        const handle = getResizeHandle(pos);
+                        if (handle && !isLocked) {
+                            const cursors = { nw: 'nw-resize', ne: 'ne-resize', sw: 'sw-resize', se: 'se-resize' };
+                            canvas.style.cursor = cursors[handle];
+                        } else if (isInsideSelection(pos)) {
+                            canvas.style.cursor = 'move';
+                        } else {
+                            canvas.style.cursor = 'crosshair';
+                        }
+                    }
+                }
+            });
+
+            canvas.addEventListener('mouseup', () => {
+                if (isDrawing || isDragging || isResizing) {
+                    normalizeSelection();
+                    saveCurrentSelection();
+                }
+                isDrawing = false;
+                isDragging = false;
+                isResizing = false;
+                resizeHandle = null;
+                dragStart = null;
+            });
+
+            canvas.addEventListener('mouseleave', () => {
+                if (isDrawing || isDragging || isResizing) {
+                    normalizeSelection();
+                    saveCurrentSelection();
+                }
+                isDrawing = false;
+                isDragging = false;
+                isResizing = false;
+                resizeHandle = null;
+            });
+        }
+
+        function normalizeSelection() {
+            if (!selection) return;
+            const { ulx, uly, lrx, lry } = selection;
+            selection.ulx = Math.round(Math.min(ulx, lrx));
+            selection.uly = Math.round(Math.min(uly, lry));
+            selection.lrx = Math.round(Math.max(ulx, lrx));
+            selection.lry = Math.round(Math.max(uly, lry));
+        }
+
+        function drawSelection(canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!selection) return;
+
+            const { ulx, uly, lrx, lry } = selection;
+            const width = lrx - ulx;
+            const height = lry - uly;
+
+            // Draw semi-transparent overlay outside selection
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, canvas.width, uly);
+            ctx.fillRect(0, uly, ulx, height);
+            ctx.fillRect(lrx, uly, canvas.width - lrx, height);
+            ctx.fillRect(0, lry, canvas.width, canvas.height - lry);
+
+            // Draw selection border
+            ctx.strokeStyle = '#0f0';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(ulx, uly, width, height);
+
+            // Draw corner handles
+            if (!isLocked) {
+                ctx.fillStyle = '#0f0';
+                const corners = [
+                    [ulx, uly], [lrx, uly],
+                    [ulx, lry], [lrx, lry]
+                ];
+                corners.forEach(([x, y]) => {
+                    ctx.fillRect(x - HANDLE_SIZE/2, y - HANDLE_SIZE/2, HANDLE_SIZE, HANDLE_SIZE);
+                });
+            }
+        }
+
+        function updateCoordinatesDisplay() {
+            if (selection) {
+                normalizeSelection();
+                coordinates.textContent =
+                    `UL(${selection.ulx}, ${selection.uly}) LR(${selection.lrx}, ${selection.lry})`;
+            } else {
+                coordinates.textContent = 'No selection';
+            }
+        }
+
+        function exportToCSV() {
+            if (Object.keys(selections).length === 0) {
+                alert('No selections to export');
+                return;
+            }
+
+            let csv = 'filename,ulx,uly,lrx,lry\n';
+
+            for (const [pageId, sel] of Object.entries(selections)) {
+                csv += `${pageId},${sel.ulx},${sel.uly},${sel.lrx},${sel.lry}\n`;
+            }
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'page-selections.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function exportVipsScript() {
+            if (Object.keys(selections).length === 0) {
+                alert('No selections to export');
+                return;
+            }
+
+            let script = '#!/bin/bash\n\n';
+            script += '# VIPS image cropping script\n';
+            script += '# Generated from page-viewer selections\n\n';
+            script += 'mkdir -p cropped\n\n';
+
+            for (const [pageId, sel] of Object.entries(selections)) {
+                const width = sel.lrx - sel.ulx;
+                const height = sel.lry - sel.uly;
+                script += `vips extract_area "${pageId}" "cropped/${pageId}" ${sel.ulx} ${sel.uly} ${width} ${height}\n`;
+            }
+
+            script += '\necho "Cropping complete!"\n';
+
+            const blob = new Blob([script], { type: 'text/x-shellscript' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'crop-images.sh';
+            a.click();
+            URL.revokeObjectURL(url);
         }
     </script>
 </body>
