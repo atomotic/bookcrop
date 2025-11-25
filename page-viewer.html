@@ -123,6 +123,72 @@
         .controls button {
             min-width: 80px;
         }
+
+        .page-indicators {
+            padding: 8px 20px;
+            background: #2a2a2a;
+            border-top: 1px solid #3a3a3a;
+            display: flex;
+            justify-content: center;
+            gap: 4px;
+            flex-wrap: wrap;
+            max-height: 80px;
+            overflow-y: auto;
+        }
+
+        .page-indicator {
+            width: 8px;
+            height: 28px;
+            background: #4a4a4a;
+            border: 1px solid #5a5a5a;
+            border-radius: 2px;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .page-indicator:hover {
+            background: #5a5a5a;
+            transform: scaleY(1.1);
+        }
+
+        .page-indicator.has-selection {
+            background: #6c9;
+            border-color: #7da;
+        }
+
+        .page-indicator.current {
+            background: #0066cc;
+            border-color: #0077ee;
+            border-width: 2px;
+            transform: scaleY(1.15);
+        }
+
+        .page-indicator.current.has-selection {
+            background: linear-gradient(to right, #0066cc 50%, #6c9 50%);
+        }
+
+        .page-indicator::after {
+            content: attr(data-page);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            margin-bottom: 4px;
+        }
+
+        .page-indicator:hover::after {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -143,6 +209,8 @@
         <button id="prevBtn" disabled>Previous</button>
         <button id="nextBtn" disabled>Next</button>
     </div>
+
+    <div class="page-indicators" id="pageIndicators"></div>
 
     <script>
         let directoryHandle = null;
@@ -170,6 +238,7 @@
         const info = document.getElementById('info');
         const coordinates = document.getElementById('coordinates');
         const imageContainer = document.getElementById('imageContainer');
+        const pageIndicators = document.getElementById('pageIndicators');
 
         const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff'];
         const STORAGE_KEY = 'page-selections';
@@ -289,6 +358,7 @@
             currentIndex = 0;
             exportBtn.disabled = false;
             exportVipsBtn.disabled = false;
+            renderPageIndicators();
             displayImage();
         }
 
@@ -329,6 +399,7 @@
             lockBtn.disabled = false;
             prevBtn.disabled = currentIndex === 0;
             nextBtn.disabled = currentIndex === imageFiles.length - 1;
+            updatePageIndicators();
         }
 
         function getCurrentPageId() {
@@ -340,6 +411,7 @@
             if (pageId && selection) {
                 selections[pageId] = { ...selection };
                 saveSelectionsForDirectory();
+                updatePageIndicators();
             }
         }
 
@@ -349,6 +421,45 @@
                 selection = { ...selections[pageId] };
             }
             updateCoordinatesDisplay();
+        }
+
+        function renderPageIndicators() {
+            pageIndicators.innerHTML = '';
+
+            imageFiles.forEach((file, index) => {
+                const indicator = document.createElement('div');
+                indicator.className = 'page-indicator';
+                indicator.dataset.page = `${index + 1}: ${file.name}`;
+                indicator.dataset.index = index;
+
+                if (selections[file.name]) {
+                    indicator.classList.add('has-selection');
+                }
+
+                if (index === currentIndex) {
+                    indicator.classList.add('current');
+                }
+
+                indicator.addEventListener('click', () => {
+                    if (currentIndex !== index) {
+                        saveCurrentSelection();
+                        currentIndex = index;
+                        displayImage();
+                    }
+                });
+
+                pageIndicators.appendChild(indicator);
+            });
+        }
+
+        function updatePageIndicators() {
+            const indicators = pageIndicators.querySelectorAll('.page-indicator');
+            indicators.forEach((indicator, index) => {
+                const fileName = imageFiles[index].name;
+
+                indicator.classList.toggle('has-selection', !!selections[fileName]);
+                indicator.classList.toggle('current', index === currentIndex);
+            });
         }
 
         function setupCanvasEvents(canvas, img) {
