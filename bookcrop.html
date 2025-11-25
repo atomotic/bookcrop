@@ -217,8 +217,10 @@
         let directoryName = null;
         let imageFiles = [];
         let currentIndex = 0;
-        let allSelections = {}; // directoryName -> { pageId -> {ulx, uly, lrx, lry} }
+        let allSelections = {}; // directoryName -> { oddPageSelection, evenPageSelection, pageId -> {ulx, uly, lrx, lry} }
         let selections = {}; // current directory's selections: pageId -> {ulx, uly, lrx, lry}
+        let oddPageSelection = null; // template selection for odd pages
+        let evenPageSelection = null; // template selection for even pages
         let isLocked = false;
 
         // Selection state
@@ -265,16 +267,31 @@
         // Load selections for current directory
         function loadSelectionsForDirectory() {
             if (directoryName && allSelections[directoryName]) {
-                selections = allSelections[directoryName];
+                const dirData = allSelections[directoryName];
+                oddPageSelection = dirData.oddPageSelection || null;
+                evenPageSelection = dirData.evenPageSelection || null;
+                // Remove the template keys from selections
+                selections = {};
+                for (const [key, value] of Object.entries(dirData)) {
+                    if (key !== 'oddPageSelection' && key !== 'evenPageSelection') {
+                        selections[key] = value;
+                    }
+                }
             } else {
                 selections = {};
+                oddPageSelection = null;
+                evenPageSelection = null;
             }
         }
 
         // Save current directory's selections
         function saveSelectionsForDirectory() {
             if (directoryName) {
-                allSelections[directoryName] = selections;
+                allSelections[directoryName] = {
+                    ...selections,
+                    oddPageSelection: oddPageSelection,
+                    evenPageSelection: evenPageSelection
+                };
                 saveAllSelectionsToStorage();
             }
         }
@@ -395,7 +412,8 @@
                 drawSelection(canvas);
             };
 
-            info.textContent = `[${directoryName}] ${currentIndex + 1} / ${imageFiles.length} - ${fileHandle.name}`;
+            const parity = getCurrentPageParity().toUpperCase();
+            info.textContent = `[${directoryName}] ${currentIndex + 1} / ${imageFiles.length} [${parity}] - ${fileHandle.name}`;
             lockBtn.disabled = false;
             prevBtn.disabled = currentIndex === 0;
             nextBtn.disabled = currentIndex === imageFiles.length - 1;
@@ -406,10 +424,25 @@
             return imageFiles[currentIndex]?.name || null;
         }
 
+        function isOddPage(index) {
+            // Page 1 (index 0) is odd, page 2 (index 1) is even, etc.
+            return index % 2 === 0;
+        }
+
+        function getCurrentPageParity() {
+            return isOddPage(currentIndex) ? 'odd' : 'even';
+        }
+
         function saveCurrentSelection() {
             const pageId = getCurrentPageId();
             if (pageId && selection) {
                 selections[pageId] = { ...selection };
+                // Also save as template for this page's parity
+                if (isOddPage(currentIndex)) {
+                    oddPageSelection = { ...selection };
+                } else {
+                    evenPageSelection = { ...selection };
+                }
                 saveSelectionsForDirectory();
                 updatePageIndicators();
             }
@@ -418,7 +451,17 @@
         function loadCurrentSelection() {
             const pageId = getCurrentPageId();
             if (pageId && selections[pageId]) {
+                // Load specific selection for this page
                 selection = { ...selections[pageId] };
+            } else if (isOddPage(currentIndex) && oddPageSelection) {
+                // Load odd page template
+                selection = { ...oddPageSelection };
+            } else if (!isOddPage(currentIndex) && evenPageSelection) {
+                // Load even page template
+                selection = { ...evenPageSelection };
+            } else {
+                // No selection available
+                selection = null;
             }
             updateCoordinatesDisplay();
         }
@@ -652,24 +695,41 @@
         function updateCoordinatesDisplay() {
             if (selection) {
                 normalizeSelection();
+                const pageId = getCurrentPageId();
+                const hasSpecificSelection = pageId && selections[pageId];
+                const parity = getCurrentPageParity().toUpperCase();
+                const source = hasSpecificSelection ? '[CUSTOM]' : `[${parity} TEMPLATE]`;
                 coordinates.textContent =
-                    `UL(${selection.ulx}, ${selection.uly}) LR(${selection.lrx}, ${selection.lry})`;
+                    `${source} UL(${selection.ulx}, ${selection.uly}) LR(${selection.lrx}, ${selection.lry})`;
             } else {
                 coordinates.textContent = 'No selection';
             }
         }
 
         function exportToCSV() {
-            if (Object.keys(selections).length === 0) {
+            if (!oddPageSelection && !evenPageSelection && Object.keys(selections).length === 0) {
                 alert('No selections to export');
                 return;
             }
 
             let csv = 'filename,ulx,uly,lrx,lry\n';
 
-            for (const [pageId, sel] of Object.entries(selections)) {
-                csv += `${pageId},${sel.ulx},${sel.uly},${sel.lrx},${sel.lry}\n`;
-            }
+            // Export selections for all pages, using templates when specific selection doesn't exist
+            imageFiles.forEach((file, index) => {
+                const pageId = file.name;
+                let sel;
+                if (selections[pageId]) {
+                    sel = selections[pageId];
+                } else if (isOddPage(index) && oddPageSelection) {
+                    sel = oddPageSelection;
+                } else if (!isOddPage(index) && evenPageSelection) {
+                    sel = evenPageSelection;
+                }
+
+                if (sel) {
+                    csv += `${pageId},${sel.ulx},${sel.uly},${sel.lrx},${sel.lry}\n`;
+                }
+            });
 
             const blob = new Blob([csv], { type: 'text/csv' });
             const url = URL.createObjectURL(blob);
@@ -681,7 +741,7 @@
         }
 
         function exportVipsScript() {
-            if (Object.keys(selections).length === 0) {
+            if (!oddPageSelection && !evenPageSelection && Object.keys(selections).length === 0) {
                 alert('No selections to export');
                 return;
             }
@@ -691,11 +751,24 @@
             script += `# Generated from BookCrop selections for: ${directoryName}\n\n`;
             script += 'mkdir -p cropped\n\n';
 
-            for (const [pageId, sel] of Object.entries(selections)) {
-                const width = sel.lrx - sel.ulx;
-                const height = sel.lry - sel.uly;
-                script += `vips extract_area "${pageId}" "cropped/${pageId}" ${sel.ulx} ${sel.uly} ${width} ${height}\n`;
-            }
+            // Export selections for all pages, using templates when specific selection doesn't exist
+            imageFiles.forEach((file, index) => {
+                const pageId = file.name;
+                let sel;
+                if (selections[pageId]) {
+                    sel = selections[pageId];
+                } else if (isOddPage(index) && oddPageSelection) {
+                    sel = oddPageSelection;
+                } else if (!isOddPage(index) && evenPageSelection) {
+                    sel = evenPageSelection;
+                }
+
+                if (sel) {
+                    const width = sel.lrx - sel.ulx;
+                    const height = sel.lry - sel.uly;
+                    script += `vips extract_area "${pageId}" "cropped/${pageId}" ${sel.ulx} ${sel.uly} ${width} ${height}\n`;
+                }
+            });
 
             script += '\necho "Cropping complete!"\n';
 
