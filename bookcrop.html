@@ -440,8 +440,16 @@
                 // Also save as template for this page's parity
                 if (isOddPage(currentIndex)) {
                     oddPageSelection = { ...selection };
+                    // If even template doesn't exist yet, initialize it with same coordinates
+                    if (!evenPageSelection) {
+                        evenPageSelection = { ...selection };
+                    }
                 } else {
                     evenPageSelection = { ...selection };
+                    // If odd template doesn't exist yet, initialize it with same coordinates
+                    if (!oddPageSelection) {
+                        oddPageSelection = { ...selection };
+                    }
                 }
                 saveSelectionsForDirectory();
                 updatePageIndicators();
@@ -500,7 +508,12 @@
             indicators.forEach((indicator, index) => {
                 const fileName = imageFiles[index].name;
 
-                indicator.classList.toggle('has-selection', !!selections[fileName]);
+                // Check if page has a specific selection OR a template selection
+                const hasSelection = !!selections[fileName] ||
+                                   (isOddPage(index) && !!oddPageSelection) ||
+                                   (!isOddPage(index) && !!evenPageSelection);
+
+                indicator.classList.toggle('has-selection', hasSelection);
                 indicator.classList.toggle('current', index === currentIndex);
             });
         }
